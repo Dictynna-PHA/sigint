@@ -13,7 +13,14 @@ import time
 
 from flask import Blueprint, Flask, Response, jsonify, request
 
+import numpy as np
+
 from utils.responses import api_error, api_success
+from utils.signal_mode_detection import (
+    KIWI_SAMPLE_RATE as ANALYSIS_SAMPLE_RATE,
+    MAX_SAMPLE_COUNT,
+    analyze_pcm,
+)
 
 try:
     from flask_sock import Sock
@@ -373,6 +380,30 @@ def websdr_status() -> Response:
             "audio_connected": _kiwi_client is not None and _kiwi_client.connected if _kiwi_client else False,
         }
     )
+
+
+@websdr_bp.route("/analyze", methods=["POST"])
+def analyze_received_audio() -> Response:
+    """Analyze a bounded PCM clip from the currently received KiwiSDR audio."""
+    payload = request.stream.read(MAX_SAMPLE_COUNT * 2 + 1)
+    if len(payload) > MAX_SAMPLE_COUNT * 2:
+        return api_error("Audio clip must be 20 seconds or shorter", 413)
+    if len(payload) % 2:
+        return api_error("Audio must contain signed 16-bit PCM samples", 400)
+
+    try:
+        samples = np.frombuffer(payload, dtype="<i2")
+        sample_rate_arg = request.args.get("sample_rate")
+        sample_rate = int(sample_rate_arg) if sample_rate_arg is not None else ANALYSIS_SAMPLE_RATE
+        freq_arg = request.args.get("freq_khz")
+        freq_khz = float(freq_arg) if freq_arg is not None else None
+        if freq_khz is not None and (not math.isfinite(freq_khz) or not 0 <= freq_khz <= 30_000):
+            return api_error("Frequency must be between 0 and 30000 kHz", 400)
+        analysis = analyze_pcm(samples, sample_rate=sample_rate, freq_khz=freq_khz)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+
+    return api_success(data={"analysis": analysis})
 
 
 # ============================================

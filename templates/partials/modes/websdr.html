@@ -60,6 +60,18 @@
                         </div>
                     </div>
 
+                    <!-- Received-audio mode analysis -->
+                    <div class="section" style="margin-top: 12px;">
+                        <h3>Signal Mode Analysis</h3>
+                        <button id="kiwiAnalyzeToggle" class="preset-btn" onclick="toggleKiwiModeAnalysis()" style="width: 100%;" disabled>
+                            Start analysis
+                        </button>
+                        <div id="kiwiModeAnalysisStatus" class="wsdr-analysis-status" aria-live="polite">
+                            Connect to a receiver to analyze its audio.
+                        </div>
+                        <div id="kiwiModeAnalysisResult" class="wsdr-analysis-result" aria-live="polite"></div>
+                    </div>
+
                     <!-- Spy Station Presets -->
                     <div class="section" style="margin-top: 12px;">
                         <h3>Spy Station Presets</h3>

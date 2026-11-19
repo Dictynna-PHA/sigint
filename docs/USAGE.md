@@ -278,10 +278,13 @@ Digital Selective Calling monitoring runs alongside AIS:
 1. **Set Frequency** - Enter a frequency in kHz (e.g., 6500 for 6.5 MHz)
 2. **Select Mode** - Choose demodulation mode (USB, LSB, AM, CW)
 3. **Find Receivers** - Click "Find Receivers" to discover available KiwiSDR nodes worldwide
-4. **Select Receiver** - Click a receiver from the list to connect
-5. **Listen** - Audio streams in real-time via WebSocket
-6. **Adjust Volume** - Use the volume slider and monitor the S-meter
-7. **Spy Station Presets** - Use the quick-tune buttons to jump to known number station frequencies
+4. **Analyze a signal** - While connected, click **Start analysis** to inspect 15-second
+   audio windows for likely digital-mode families. Results include evidence and heuristic
+   confidence; this initial feature does not decode payloads.
+5. **Select Receiver** - Click a receiver from the list to connect
+6. **Listen** - Audio streams in real-time via WebSocket
+7. **Adjust Volume** - Use the volume slider and monitor the S-meter
+8. **Spy Station Presets** - Use the quick-tune buttons to jump to known number station frequencies
 
 ### Tips
 

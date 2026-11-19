@@ -71,6 +71,42 @@ def test_websdr_status(auth_client):
     assert "cached_receivers" in data
 
 
+def test_websdr_analyze_rejects_short_audio(auth_client):
+    response = auth_client.post("/websdr/analyze", data=b"\0" * 100, content_type="application/octet-stream")
+    assert response.status_code == 400
+    assert "4 and 20 seconds" in response.get_json()["message"]
+
+
+def test_websdr_analyze_rejects_oversized_audio(auth_client):
+    response = auth_client.post(
+        "/websdr/analyze",
+        data=b"\0" * (20 * 12_000 * 2 + 1),
+        content_type="application/octet-stream",
+    )
+    assert response.status_code == 413
+
+
+def test_websdr_analyze_rejects_invalid_sample_rate(auth_client):
+    response = auth_client.post(
+        "/websdr/analyze?sample_rate=8000",
+        data=b"\0" * (4 * 12_000 * 2),
+        content_type="application/octet-stream",
+    )
+    assert response.status_code == 400
+    assert "Sample rate" in response.get_json()["message"]
+
+
+def test_websdr_analyze_returns_audio_features(auth_client):
+    import numpy as np
+
+    samples = np.zeros(4 * 12_000, dtype="<i2")
+    response = auth_client.post("/websdr/analyze", data=samples.tobytes(), content_type="application/octet-stream")
+    assert response.status_code == 200
+    result = response.get_json()["analysis"]
+    assert result["classification"] == "unknown"
+    assert "no payload decoding" in result["notice"]
+
+
 def test_websdr_receivers_empty_cache(auth_client):
     """Receivers endpoint should work even with empty cache."""
     with patch("routes.websdr.get_receivers", return_value=[]):

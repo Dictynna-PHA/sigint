@@ -154,6 +154,28 @@
     color: var(--accent-cyan);
 }
 
+.wsdr-analysis-status {
+    margin-top: 8px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.wsdr-analysis-result {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-primary);
+}
+
+.wsdr-analysis-result ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    color: var(--text-secondary);
+}
+
+.wsdr-analysis-result li + li {
+    margin-top: 4px;
+}
+
 @media (max-width: 900px) {
     .wsdr-layout {
         grid-template-columns: 1fr !important;

@@ -36,8 +36,14 @@ let kiwiCurrentMode = 'am';
 let kiwiSmeter = 0;
 let kiwiSmeterInterval = null;
 let kiwiReceiverName = '';
+let kiwiModeAnalysisEnabled = false;
+let kiwiModeAnalysisInFlight = false;
+let kiwiModeAnalysisGeneration = 0;
+let kiwiModeAnalysisChunks = [];
+let kiwiModeAnalysisSampleCount = 0;
 
 const KIWI_SAMPLE_RATE = 12000;
+const KIWI_ANALYSIS_WINDOW_SAMPLES = 15 * KIWI_SAMPLE_RATE;
 
 // ============== INITIALIZATION ==============
 
@@ -839,6 +845,11 @@ function handleKiwiStatus(msg) {
         case 'tuned':
             kiwiCurrentFreq = msg.freq_khz;
             kiwiCurrentMode = msg.mode;
+            kiwiModeAnalysisGeneration++;
+            kiwiModeAnalysisInFlight = false;
+            kiwiModeAnalysisChunks = [];
+            kiwiModeAnalysisSampleCount = 0;
+            if (kiwiModeAnalysisEnabled) setKiwiModeAnalysisStatus('Collecting 15 seconds of received audio…');
             updateKiwiUI('connected');
             break;
         case 'error':
@@ -865,6 +876,7 @@ function handleKiwiAudio(arrayBuffer) {
 
     // Remaining bytes: PCM 16-bit signed LE
     const pcmData = new Int16Array(arrayBuffer, 2);
+    collectKiwiModeAnalysis(pcmData);
 
     // Convert to float32 [-1, 1] for Web Audio API
     const float32 = new Float32Array(pcmData.length);
@@ -878,6 +890,104 @@ function handleKiwiAudio(arrayBuffer) {
     while (kiwiAudioBuffer.length > maxChunks) {
         kiwiAudioBuffer.shift();
     }
+}
+
+function toggleKiwiModeAnalysis() {
+    kiwiModeAnalysisEnabled = !kiwiModeAnalysisEnabled;
+    kiwiModeAnalysisGeneration++;
+    kiwiModeAnalysisInFlight = false;
+    kiwiModeAnalysisChunks = [];
+    kiwiModeAnalysisSampleCount = 0;
+    const button = document.getElementById('kiwiAnalyzeToggle');
+    if (button) button.textContent = kiwiModeAnalysisEnabled ? 'Stop analysis' : 'Start analysis';
+    setKiwiModeAnalysisStatus(kiwiModeAnalysisEnabled
+        ? 'Collecting 15 seconds of received audio…'
+        : 'Mode analysis stopped.');
+}
+
+function collectKiwiModeAnalysis(pcmData) {
+    if (!kiwiModeAnalysisEnabled || kiwiModeAnalysisInFlight) return;
+    kiwiModeAnalysisChunks.push(new Int16Array(pcmData));
+    kiwiModeAnalysisSampleCount += pcmData.length;
+    if (kiwiModeAnalysisSampleCount >= KIWI_ANALYSIS_WINDOW_SAMPLES) analyzeKiwiModeWindow();
+}
+
+async function analyzeKiwiModeWindow() {
+    if (kiwiModeAnalysisInFlight || !kiwiModeAnalysisEnabled) return;
+    kiwiModeAnalysisInFlight = true;
+    const generation = kiwiModeAnalysisGeneration;
+    const samples = new Int16Array(kiwiModeAnalysisSampleCount);
+    let offset = 0;
+    for (const chunk of kiwiModeAnalysisChunks) {
+        samples.set(chunk, offset);
+        offset += chunk.length;
+    }
+    kiwiModeAnalysisChunks = [];
+    kiwiModeAnalysisSampleCount = 0;
+    setKiwiModeAnalysisStatus('Analyzing received audio…');
+
+    try {
+        const query = new URLSearchParams({
+            sample_rate: String(KIWI_SAMPLE_RATE),
+            freq_khz: String(kiwiCurrentFreq),
+        });
+        const response = await fetch(`/websdr/analyze?${query}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: samples.buffer,
+        });
+        const result = await response.json();
+        if (!response.ok || result.status !== 'success') {
+            throw new Error(result.message || 'Signal analysis failed');
+        }
+        if (kiwiModeAnalysisEnabled && generation === kiwiModeAnalysisGeneration) {
+            renderKiwiModeAnalysis(result.analysis);
+            setKiwiModeAnalysisStatus('Collecting the next 15-second audio window…');
+        }
+    } catch (error) {
+        if (kiwiModeAnalysisEnabled && generation === kiwiModeAnalysisGeneration) setKiwiModeAnalysisStatus(error.message);
+    } finally {
+        if (generation === kiwiModeAnalysisGeneration) kiwiModeAnalysisInFlight = false;
+    }
+}
+
+function renderKiwiModeAnalysis(analysis) {
+    const container = document.getElementById('kiwiModeAnalysisResult');
+    if (!container) return;
+    container.replaceChildren();
+
+    const candidates = analysis.candidates || [];
+    if (candidates.length) {
+        const list = document.createElement('ul');
+        for (const candidate of candidates) {
+            const entry = document.createElement('li');
+            entry.textContent = `${candidate.name} · ${Math.round(candidate.confidence * 100)}% heuristic confidence`;
+            if (candidate.description) {
+                const description = document.createElement('div');
+                description.textContent = candidate.description;
+                entry.appendChild(description);
+            }
+            list.appendChild(entry);
+        }
+        container.appendChild(list);
+    } else {
+        const message = document.createElement('span');
+        message.textContent = 'No supported mode fingerprint identified.';
+        container.appendChild(message);
+    }
+
+    const evidence = document.createElement('ul');
+    for (const item of analysis.evidence || []) {
+        const entry = document.createElement('li');
+        entry.textContent = item;
+        evidence.appendChild(entry);
+    }
+    container.appendChild(evidence);
+}
+
+function setKiwiModeAnalysisStatus(message) {
+    const status = document.getElementById('kiwiModeAnalysisStatus');
+    if (status) status.textContent = message;
 }
 
 function initKiwiAudioContext(sampleRate) {
@@ -953,6 +1063,17 @@ function disconnectFromReceiver() {
 }
 
 function cleanupKiwiAudio() {
+    kiwiModeAnalysisEnabled = false;
+    kiwiModeAnalysisGeneration++;
+    kiwiModeAnalysisInFlight = false;
+    kiwiModeAnalysisChunks = [];
+    kiwiModeAnalysisSampleCount = 0;
+    const analysisButton = document.getElementById('kiwiAnalyzeToggle');
+    if (analysisButton) {
+        analysisButton.disabled = true;
+        analysisButton.textContent = 'Start analysis';
+    }
+    setKiwiModeAnalysisStatus('Connect to a receiver to analyze its audio.');
     if (kiwiSmeterInterval) {
         VisibleInterval.clear(kiwiSmeterInterval);
         kiwiSmeterInterval = null;
@@ -1042,6 +1163,8 @@ function updateKiwiUI(state) {
     const barReceiverName = document.getElementById('kiwiBarReceiverName');
     const barFreq = document.getElementById('kiwiBarFrequency');
     const barMode = document.getElementById('kiwiBarMode');
+    const analysisButton = document.getElementById('kiwiAnalyzeToggle');
+    if (analysisButton) analysisButton.disabled = state !== 'connected';
 
     if (state === 'connected') {
         if (statusEl) {
@@ -1191,4 +1314,5 @@ window.disconnectFromReceiver = disconnectFromReceiver;
 window.tuneKiwi = tuneKiwi;
 window.tuneFromBar = tuneFromBar;
 window.setKiwiVolume = setKiwiVolume;
+window.toggleKiwiModeAnalysis = toggleKiwiModeAnalysis;
 window.WebSDR = WebSDR;
